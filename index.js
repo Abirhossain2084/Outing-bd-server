@@ -36,7 +36,7 @@ const client = new MongoClient(uri, {
 
 const store_id = process.env.SSL_STORE_ID;
 const store_passwd = process.env.SSL_STORE_PASS;
-const is_live = true //true for live, false for sandbox
+const is_live = false //true for live, false for sandbox
 
 async function run() {
   try {
@@ -53,8 +53,9 @@ async function run() {
     const bookingCollection = client.db('OutingBD').collection('bookingdata')
     const guidebookingCollection = client.db('OutingBD').collection('guidebookingdata')
 
-   const packagePaymentCollection = client.db('OutingBD').collection('packagePayment')
-   
+    const packagePaymentCollection = client.db('OutingBD').collection('packagePayment')
+    const guidePaymentCollection = client.db('OutingBD').collection('guidePayment')
+
     // get packages data
 
     app.get('/packages', async (req, res) => {
@@ -122,6 +123,10 @@ async function run() {
       const result = await bookingCollection.find(query).toArray();
       res.send(result);
     })
+
+
+
+   
 
 
     //delete booking
@@ -319,20 +324,31 @@ async function run() {
       res.send(result);
     })
 
+    // payment details
+
+    app.get('/payment', async (req, res) => {
+      const cursor = packagePaymentCollection.find();
+      const result = await cursor.toArray();
+      res.send(result);
+    })
+
 
     // :::dahsboard End::::
 
 
-    // :::PAYMENT::::
+    // :::PAYMENT::::for package
 
     const tran_id = new ObjectId().toString();
+    console.log("tran id",tran_id);
 
     app.post("/order", async (req, res) => {
 
 
       const order = req.body;
       const package = await bookingCollection.findOne({ _id: new ObjectId(req.body._id) });
-      // console.log(package.price);
+      
+
+      console.log(package.price);
 
       const data = {
         total_amount: package.price,
@@ -365,55 +381,149 @@ async function run() {
         ship_country: 'Bangladesh',
       };
       console.log(data);
-      console.log(store_id,store_passwd);
+      console.log(store_id, store_passwd);
 
 
 
       const sslcz = new SSLCommerzPayment(store_id, store_passwd, is_live)
-     
-      sslcz.init(data).then((apiResponse) => {
-          // Redirect the user to payment gateway
-          let GatewayPageURL = apiResponse.GatewayPageURL
-          res.send({url: GatewayPageURL});
 
-          const finalOrder = {
-            package,
-            paidStatus:false,
-            tramsactionId:tran_id
-          }
-          const result = packagePaymentCollection.insertOne(finalOrder);
-          console.log('Redirecting to: ', GatewayPageURL)
-          
-        
+      sslcz.init(data).then((apiResponse) => {
+        // Redirect the user to payment gateway
+        let GatewayPageURL = apiResponse.GatewayPageURL
+        res.send({ url: GatewayPageURL });
+
+        const finalOrder = {
+          package,
+          paidStatus: false,
+          tramsactionId: tran_id
+        }
+        const result = packagePaymentCollection.insertOne(finalOrder);
+        console.log('Redirecting to: ', GatewayPageURL)
+
+
       });
 
-      app.post("/payment/success/:tranId",async(req,res)=>{
+      app.post("/payment/success/:tranId", async (req, res) => {
         console.log(req.params.tranId);
-        const result = await packagePaymentCollection.updateOne({tramsactionId:req.params.tranId},{
-          $set:{
-            paidStatus:true,
+        const result = await packagePaymentCollection.updateOne({ tramsactionId: req.params.tranId }, {
+          $set: {
+            paidStatus: true,
           },
         });
-        
-        if(result.modifiedCount>0){
+
+        if (result.modifiedCount > 0) {
           res.redirect(`http://localhost:5173/payment/success/${req.params.tranId}`)
         }
-      
+
       });
 
-      app.post("/payment/fail/:tranId",async(req,res)=>{
-        const result = await packagePaymentCollection.deleteOne({tramsactionId:req.params.tranId})
+      app.post("/payment/fail/:tranId", async (req, res) => {
+        const result = await packagePaymentCollection.deleteOne({ tramsactionId: req.params.tranId })
 
-        if(result.deletedCount){
+        if (result.deletedCount) {
           res.redirect(`http://localhost:5173/payment/fail/${req.params.tranId}`)
         }
       })
-      
+
 
 
     })
 
-  
+
+    //payment for guide 
+    const guidetran_id = new ObjectId().toString();
+    console.log("tran id",guidetran_id);
+
+    app.post("/guideorder", async (req, res) => {
+
+
+      const gorder = req.body;
+      const guide = await guidebookingCollection.findOne({ _id: new ObjectId(req.body._id) });
+      
+
+      console.log(guide.gprice);
+
+      const data = {
+        total_amount: guide.price,
+        currency: 'BDT',
+        tran_id: guidetran_id, // use unique tran_id for each api call
+        success_url: `http://localhost:5000/payment/success/${guidetran_id}`,
+        fail_url: `http://localhost:5000/payment/fail/${guidetran_id}`,
+        cancel_url: 'http://localhost:3030/cancel',
+        ipn_url: 'http://localhost:3030/ipn',
+        shipping_method: 'Courier',
+        product_name: gorder.name,
+        product_category: 'a',
+        product_profile: 'general',
+        cus_name: gorder.uname,
+        cus_email: gorder.email,
+        cus_add1: 'Dhaka',
+        cus_add2: 'Dhaka',
+        cus_city: 'Dhaka',
+        cus_state: 'Dhaka',
+        cus_postcode: '1000',
+        cus_country: 'Bangladesh',
+        cus_phone: '01711111111',
+        cus_fax: '01711111111',
+        ship_name: 'Customer Name',
+        ship_add1: 'Dhaka',
+        ship_add2: 'Dhaka',
+        ship_city: 'Dhaka',
+        ship_state: 'Dhaka',
+        ship_postcode: 1000,
+        ship_country: 'Bangladesh',
+      };
+      console.log(data);
+      console.log(store_id, store_passwd);
+
+
+
+      const sslcz = new SSLCommerzPayment(store_id, store_passwd, is_live)
+
+      sslcz.init(data).then((apiResponse) => {
+        // Redirect the user to payment gateway
+        let GatewayPageURL = apiResponse.GatewayPageURL
+        res.send({ url: GatewayPageURL });
+
+        const finalOrder = {
+          guide,
+          paidStatus: false,
+          tramsactionId: guidetran_id
+        }
+        const result = guidePaymentCollection.insertOne(finalOrder);
+        console.log('Redirecting to: ', GatewayPageURL)
+
+
+      });
+
+      app.post("/payment/success/:tranId", async (req, res) => {
+        console.log(req.params.tranId);
+        const result = await guidePaymentCollection.updateOne({ tramsactionId: req.params.tranId }, {
+          $set: {
+            paidStatus: true,
+          },
+        });
+
+        if (result.modifiedCount > 0) {
+          res.redirect(`http://localhost:5173/payment/success/${req.params.tranId}`)
+        }
+
+      });
+
+      app.post("/payment/fail/:tranId", async (req, res) => {
+        const result = await guidePaymentCollection.deleteOne({ tramsactionId: req.params.tranId })
+
+        if (result.deletedCount) {
+          res.redirect(`http://localhost:5173/payment/fail/${req.params.tranId}`)
+        }
+      })
+
+
+
+    })
+
+
+
 
 
 
